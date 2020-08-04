@@ -111,6 +111,21 @@ void sig_handler(int signo) {
     }
 }
 
+void setup_sig_handler() {
+    struct sigaction sig_action;
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+
+    sig_action.sa_handler = sig_handler;
+    sig_action.sa_mask = mask;
+    sig_action.sa_flags = 0;
+
+    sigaction(SIGINT, &sig_action, NULL);
+
+    ext_window *std_scr = ext_window_create_from_existing(stdscr);
+}
+
 void send_msg(msg_window *display_window, edit_window *edit_window, char* msg) {
     if (display_window->print_curs->cur_col > 0) {
         if (display_window->print_curs->cur_line >= display_window->nlines - 1) {
