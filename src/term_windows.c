@@ -15,6 +15,34 @@
 // message to a window and displaying all the messages in a window should be
 // decoupled and handled seperately
 
+void term_windows_init() {
+    // Set our locale to be portable, since our ncurses instance will inherit
+    // this
+    setlocale(LC_ALL, "");
+
+    // Initialqize curses in standard mode
+    initscr(); // Intialize our screen; we need to do this before anything else
+    cbreak(); // Disable line-buffering (and buffering in general)
+    noecho(); // Disable echoing of characters read into stdin
+    nonl(); // Do not automatically read a return key press as a newline0
+    // Disable flushing of the tty output driver when an interrupt key is 
+    // pressed (preventing curses from losing its place)
+    intrflush(stdscr, FALSE);
+    // Use single values for function keys
+    // (making it easier to read key inputs)
+    keypad(stdscr, TRUE);
+}
+
+void term_windows_end() {
+    // Reset all terminal input and output options
+    nocbreak();
+    echo();
+    nl();
+
+    // end curses
+    endwin();
+}
+
 ext_window *ext_window_create(uint16_t nlines, uint16_t ncols, uint16_t start_row, uint16_t start_col) {
     ext_window *new_ext_window = malloc(sizeof(ext_window));
     
@@ -36,9 +64,118 @@ ext_window *ext_window_create_from_existing(WINDOW *win) {
     return new_ext_window;
 }
 
+edit_window *edit_window_create(uint16_t nlines, uint16_t ncols, uint16_t start_row, uint16_t start_col) {
+    edit_window *new_edit_window = malloc(sizeof(edit_window));
+
+    new_edit_window->window = newwin(nlines, ncols, start_row, start_col);
+    new_edit_window->ncols = ncols;
+    new_edit_window->nlines = nlines;
+
+    new_edit_window->print_curs = malloc(sizeof(cursor));
+    new_edit_window->print_curs->cur_line = 0;
+    new_edit_window->print_curs->cur_col = 0;
+
+    return new_edit_window;
+}
+
+// TODO Handle case where we try to move up too many lines
+int64_t edit_window_move_v(edit_window *win, int64_t nlines) {
+    uint64_t displacement = nlines;
+
+    // We are moving past the last visible line. Time to scroll.
+    if (win->print_curs->cur_line + nlines > win->nlines - 1) {
+        displacement = win->nlines - win->print_curs->cur_line;
+    }
+    else if (win->print_curs->cur_line + nlines < 0) {
+        displacement = -(win->print_curs->cur_col);
+    }
+
+    win->print_curs->cur_line += displacement;
+
+    wmove(win->window, win->print_curs->cur_line, win->print_curs->cur_col);
+    wrefresh(win->window);
+
+    return displacement;
+}
+
+int32_t edit_window_move_h(edit_window *win, int32_t ncols) {
+    int32_t displacement;
+    uint8_t max_disp = win->ncols - win->print_curs->cur_col;
+
+    if (ncols > max_disp) {
+        displacement = max_disp;
+    }
+    else if (win->print_curs->cur_col - ncols < 0) {
+        displacement = -(win->print_curs->cur_col);
+    }
+    else {
+        displacement = ncols;
+    }
+
+    wmove(win->window, win->print_curs->cur_line, win->print_curs->cur_col + displacement);
+    wrefresh(win->window);
+
+    return displacement;
+}
+
+int8_t edit_window_set_row(edit_window *win, uint16_t line_num) {
+    if (line_num >= 0 && line_num <= win->nlines) {
+        win->print_curs->cur_line = line_num;
+        wmove(win->window, line_num, win->print_curs->cur_col);
+        wrefresh(win->window);
+
+        return 0;
+    }
+
+    return -1;
+}
+
+int8_t edit_window_set_col(edit_window *win, uint16_t col_num) {
+    if (col_num >= 0 && col_num <= win->ncols) {
+        win->print_curs->cur_col = col_num;
+        wmove(win->window, col_num, win->print_curs->cur_col);
+        wrefresh(win->window);
+
+        return 0;
+    }
+
+    return -1;
+}
+
+int8_t edit_window_clrln(edit_window *win) {
+    wclrtoeol(win->window);
+    wrefresh(win->window);
+
+    return 0;
+}
+
+int8_t edit_window_putc(edit_window *win, char c) {
+    waddch(win->window, c);
+    wrefresh(win->window);
+
+    win->print_curs->cur_col++;
+
+    return 0;
+}
+
+int8_t edit_window_backspace(edit_window *win) {
+    if (win->print_curs->cur_col > 0) {
+        wmove(win->window, win->print_curs->cur_line, --(win->print_curs->cur_col));
+
+        // Delete the character present)
+        wdelch(win->window);
+
+        wrefresh(win->window);
+
+        return 0;
+    }
+
+    return -1;
+}
+
 msg_window *msg_window_create(uint16_t nlines, uint16_t ncols, uint16_t start_row, uint16_t start_col) {
     msg_window *new_msg_window = malloc(sizeof(msg_window));
-    
+
     new_msg_window->window = newwin(nlines, ncols, start_row, start_col);
     scrollok(new_msg_window->window, TRUE);
     new_msg_window->nlines = nlines;
@@ -55,52 +192,7 @@ msg_window *msg_window_create(uint16_t nlines, uint16_t ncols, uint16_t start_ro
     return new_msg_window;
 }
 
-msg_window *msg_window_create_from_existing(WINDOW *win) {
-    msg_window *new_msg_window = malloc(sizeof(msg_window));
-
-    new_msg_window->window = win;
-    scrollok(win, TRUE);
-
-    getmaxyx(win, new_msg_window->nlines, new_msg_window->ncols);
-    new_msg_window->ncols++;
-    new_msg_window->nlines++;
-
-    new_msg_window->read_curs = malloc(sizeof(cursor));
-    new_msg_window->read_curs->cur_line = 0;
-    new_msg_window->read_curs->cur_col = 0;
-
-    new_msg_window->print_curs = malloc(sizeof(cursor));
-    new_msg_window->print_curs->cur_line = 0;
-    new_msg_window->print_curs->cur_col = 0;
-
-    return new_msg_window;
-}
-
-edit_window *edit_window_create(uint16_t nlines, uint16_t ncols, uint16_t start_row, uint16_t start_col) {
-    edit_window *new_edit_window = malloc(sizeof(edit_window));
-
-    new_edit_window->window = newwin(nlines, ncols, start_row, start_col);
-    new_edit_window->ncols = ncols;
-    new_edit_window->nlines = nlines;
-
-    new_edit_window->print_curs = malloc(sizeof(cursor));
-    new_edit_window->print_curs->cur_line = 0;
-    new_edit_window->print_curs->cur_col = 0;
-
-    return new_edit_window;
-}
-
-edit_window *edit_window_create_from_existing(WINDOW *win) {
-    edit_window *new_edit_window = malloc(sizeof(edit_window));
-
-    new_edit_window->window = win;
-    new_edit_window->print_curs = malloc(sizeof(cursor));
-    new_edit_window->print_curs->cur_line = 0;
-    new_edit_window->print_curs->cur_col = 0;
-
-    return new_edit_window;
-}
-
+// TODO Handle case where we try to move up too many lines
 int64_t msg_window_move_v(msg_window *win, int64_t nlines) {
     uint64_t displacement = nlines;
 
@@ -174,21 +266,6 @@ int8_t msg_window_scroll(msg_window* win, uint64_t nlines) {
     return 0;
 }
 
-int8_t edit_window_backspace(edit_window *win) {
-    if (win->print_curs->cur_col > 0) {
-        wmove(win->window, win->print_curs->cur_line, --(win->print_curs->cur_col));
-
-        // Delete the character present)
-        wdelch(win->window);
-
-        wrefresh(win->window);
-
-        return 0;
-    }
-
-    return -1;
-}
-
 int8_t msg_window_puts(msg_window *win, char* str) {
     waddstr(win->window, str);
     wrefresh(win->window);
@@ -196,64 +273,4 @@ int8_t msg_window_puts(msg_window *win, char* str) {
     win->print_curs->cur_col += strlen(str);
 
     return 0;
-}
-
-int8_t edit_window_putc(edit_window *win, char c) {
-    waddch(win->window, c);
-    wrefresh(win->window);
-
-    win->print_curs->cur_col++;
-
-    return 0;
-}
-
-int8_t edit_window_clrln(edit_window *win) {
-    wclrtoeol(win->window);
-    wrefresh(win->window);
-
-    return 0;
-}
-
-int32_t edit_window_move_h(edit_window *win, int32_t ncols) {
-    int32_t displacement;
-    uint8_t max_disp = win->ncols - win->print_curs->cur_col;
-
-    if (ncols > max_disp) {
-        displacement = max_disp;
-    }
-    else if (win->print_curs->cur_col - ncols < 0) {
-        displacement = -(win->print_curs->cur_col);
-    }
-    else {
-        displacement = ncols;
-    }
-
-    wmove(win->window, win->print_curs->cur_line, win->print_curs->cur_col + displacement);
-    wrefresh(win->window);
-
-    return displacement;
-}
-
-int8_t edit_window_set_row(edit_window *win, uint16_t line_num) {
-    if (line_num >= 0 && line_num <= win->nlines) {
-        win->print_curs->cur_line = line_num;
-        wmove(win->window, line_num, win->print_curs->cur_col);
-        wrefresh(win->window);
-
-        return 0;
-    }
-
-    return -1;
-}
-
-int8_t edit_window_set_col(edit_window *win, uint16_t col_num) {
-    if (col_num >= 0 && col_num <= win->ncols) {
-        win->print_curs->cur_col = col_num;
-        wmove(win->window, col_num, win->print_curs->cur_col);
-        wrefresh(win->window);
-
-        return 0;
-    }
-
-    return -1;
 }

@@ -17,7 +17,7 @@ FILE *log_file;
 
 int main(int argc, char* argv[]) {
     // Initialize ncurses and basic window setup.
-    term_mode_init();
+    term_windows_init();
 
     // Note: We must set up signal handlers AFTER initializing curses
     setup_sig_handler();
@@ -106,42 +106,9 @@ int main(int argc, char* argv[]) {
 void sig_handler(int signo) {
     if (signo == SIGINT) {
         fclose(log_file);
-        term_mode_reset();
+        term_windows_end();
         exit(1);
     }
-}
-
-void term_mode_init() {
-    // Set our locale to be portable, since our ncurses instance will inherit
-    // this
-    setlocale(LC_ALL, "");
-
-    // Initialqize curses in standard mode
-    initscr(); // Intialize our screen; we need to do this before anything else
-    cbreak(); // Disable line-buffering (and buffering in general)
-    noecho(); // Disable echoing of characters read into stdin
-    nonl(); // Do not automatically read a return key press as a newline0
-    // Disable flushing of the tty output driver when an interrupt key is 
-    // pressed (preventing curses from losing its place)
-    intrflush(stdscr, FALSE);
-    // Use single values for function keys
-    // (making it easier to read key inputs)
-    keypad(stdscr, TRUE);
-}
-
-void setup_sig_handler() {
-    struct sigaction sig_action;
-    sigset_t mask;
-    sigemptyset(&mask);
-    sigaddset(&mask, SIGINT);
-
-    sig_action.sa_handler = sig_handler;
-    sig_action.sa_mask = mask;
-    sig_action.sa_flags = 0;
-
-    sigaction(SIGINT, &sig_action, NULL);
-
-    ext_window *std_scr = ext_window_create_from_existing(stdscr);
 }
 
 void send_msg(msg_window *display_window, edit_window *edit_window, char* msg) {
@@ -165,15 +132,4 @@ void send_msg(msg_window *display_window, edit_window *edit_window, char* msg) {
     edit_window_set_col(edit_window, 0);
     edit_window_set_row(edit_window, 1);
     edit_window_clrln(edit_window);
-}
-
-void term_mode_reset() {
-    // Reset all terminal input and output options
-    nocbreak();
-    echo();
-    nl();
-
-    // end curses
-    endwin();
-    printf("Resetting Terminal\n");
 }
